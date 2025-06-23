@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Merger</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .file-input {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .status {
+            margin: 15px 0;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+        }
+
+        .error {
+            background-color: #ffeeee;
+            color: #cc0000;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f0f9ff;
+            border-radius: 4px;
+        }
+
+        .download-link {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #2196F3;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Audio Merger - Standalone Version</h1>
+
+    <div id="status" class="status">Loading FFmpeg...</div>
+
+    <div id="error" class="error" style="display: none;"></div>
+
+    <div class="file-input">
+        <label for="speech">Speech Audio File:</label>
+        <input type="file" id="speech" accept="audio/*">
+        <div id="speech-info"></div>
+    </div>
+
+    <div class="file-input">
+        <label for="music">Background Music File:</label>
+        <input type="file" id="music" accept="audio/*">
+        <div id="music-info"></div>
+    </div>
+
+    <button id="merge-button" disabled>Merge Audio Files</button>
+
+    <div id="result" class="result" style="display: none;">
+        <h3>Your merged audio is ready!</h3>
+        <audio id="audio-player" controls style="width: 100%; margin-bottom: 10px;"></audio>
+        <a id="download-link" class="download-link" download="merged-audio.mp3">Download Merged Audio</a>
+    </div>
+
+    <!-- FFmpeg dependencies -->
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.5/dist/umd/ffmpeg.js"></script>
+    <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            // DOM Elements
+            const statusEl = document.getElementById('status');
+            const errorEl = document.getElementById('error');
+            const speechInput = document.getElementById('speech');
+            const musicInput = document.getElementById('music');
+            const speechInfo = document.getElementById('speech-info');
+            const musicInfo = document.getElementById('music-info');
+            const mergeButton = document.getElementById('merge-button');
+            const resultEl = document.getElementById('result');
+            const audioPlayer = document.getElementById('audio-player');
+            const downloadLink = document.getElementById('download-link');
+
+            // State
+            let ffmpeg = null;
+            let speechFile = null;
+            let musicFile = null;
+
+            // Initialize FFmpeg
+            try {
+                statusEl.textContent = 'Loading FFmpeg...';
+                ffmpeg = new FFmpeg.FFmpeg();
+
+                // Load FFmpeg
+                await ffmpeg.load({
+                    coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.3/dist/umd/ffmpeg-core.js',
+                    wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.3/dist/umd/ffmpeg-core.wasm',
+                    workerURL: 'https://unpkg.com/@ffmpeg/core@0.12.3/dist/umd/ffmpeg-core.worker.js'
+                });
+
+                statusEl.textContent = 'FFmpeg loaded successfully. Ready to merge audio files.';
+                mergeButton.disabled = true;
+            } catch (error) {
+                console.error('Error loading FFmpeg:', error);
+                statusEl.textContent = 'Failed to load audio processing capabilities.';
+                showError(`Error loading FFmpeg: ${error.message}`);
+                return;
+            }
+
+            // Event listeners
+            speechInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    speechFile = e.target.files[0];
+                    speechInfo.textContent = `Selected: ${speechFile.name} (${(speechFile.size / 1024 / 1024).toFixed(2)} MB)`;
+                    updateMergeButton();
+                }
+            });
+
+            musicInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    musicFile = e.target.files[0];
+                    musicInfo.textContent = `Selected: ${musicFile.name} (${(musicFile.size / 1024 / 1024).toFixed(2)} MB)`;
+                    updateMergeButton();
+                }
+            });
+
+            mergeButton.addEventListener('click', async () => {
+                try {
+                    // Hide previous results and errors
+                    resultEl.style.display = 'none';
+                    errorEl.style.display = 'none';
+
+                    // Validate files
+                    if (!speechFile || !musicFile) {
+                        showError('Please select both a speech file and a music file.');
+                        return;
+                    }
+
+                    // Start merging
+                    mergeButton.disabled = true;
+                    statusEl.textContent = 'Processing audio files...';
+
+                    // Write files to FFmpeg virtual file system
+                    statusEl.textContent = 'Loading speech audio...';
+                    await ffmpeg.writeFile('speech.mp3', await FFmpegUtil.fetchFile(speechFile));
+
+                    statusEl.textContent = 'Loading music audio...';
+                    await ffmpeg.writeFile('music.mp3', await FFmpegUtil.fetchFile(musicFile));
+
+                    // Run FFmpeg command to merge files
+                    statusEl.textContent = 'Merging audio files...';
+                    await ffmpeg.exec([
+                        '-i', 'speech.mp3',
+                        '-i', 'music.mp3',
+                        '-filter_complex', '[0:a]volume=1.0[a1];[1:a]volume=0.4[a2];[a1][a2]amix=inputs=2:duration=longest',
+                        '-c:a', 'libmp3lame',
+                        '-b:a', '192k',
+                        'output.mp3'
+                    ]);
+
+                    // Read the output file
+                    statusEl.textContent = 'Preparing download...';
+                    const data = await ffmpeg.readFile('output.mp3');
+
+                    // Create blob and URL
+                    const blob = new Blob([data], { type: 'audio/mpeg' });
+                    const url = URL.createObjectURL(blob);
+
+                    // Set up audio player and download link
+                    audioPlayer.src = url;
+                    downloadLink.href = url;
+
+                    // Show result
+                    resultEl.style.display = 'block';
+                    statusEl.textContent = 'Audio files merged successfully!';
+                } catch (error) {
+                    console.error('Error merging audio:', error);
+                    showError(`Error merging audio: ${error.message}`);
+                    statusEl.textContent = 'Failed to merge audio files.';
+                } finally {
+                    mergeButton.disabled = false;
+                }
+            });
+
+            // Helper functions
+            function updateMergeButton() {
+                mergeButton.disabled = !(speechFile && musicFile && ffmpeg);
+            }
+
+            function showError(message) {
+                errorEl.textContent = message;
+                errorEl.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+
+</html>
